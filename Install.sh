@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -e
 
 EXECUTE=false
@@ -18,39 +17,22 @@ run() {
     echo "▶️ Running: $CMD"
     if ! eval "$CMD"; then
       echo "❌ Command failed: $CMD"
-
-      # Attempt to fix common issues
-      if echo "$CMD" | grep -q "makepkg"; then
-        echo "🛠️ Installing base-devel and git..."
-        sudo pacman -S --needed base-devel git
-      elif echo "$CMD" | grep -q "yay"; then
-        echo "🛠️ Installing yay..."
-        sudo pacman -S --needed base-devel git
-        git clone https://aur.archlinux.org/yay.git || true
-        cd yay && makepkg -si --noconfirm && cd ..
-      elif echo "$CMD" | grep -q "flatpak"; then
-        echo "🛠️ Installing flatpak..."
-        sudo pacman -S --noconfirm flatpak
-      elif echo "$CMD" | grep -q "pamac"; then
-        echo "🛠️ Installing pamac-cli..."
-        sudo pacman -S --noconfirm pamac-cli
-      fi
-
-      echo "🔁 Retrying: $CMD"
-      if ! eval "$CMD"; then
-        echo "⚠️ Still failed after retry: $CMD — skipping."
-      fi
+      echo "⚠️ Skipping failed command."
     fi
   else
     echo "🧪 Would run: $CMD"
   fi
 }
 
+#==================== Update system & install base-devel
+run "sudo pacman -Syu --noconfirm"
+run "sudo pacman -S --needed base-devel git --noconfirm"
+
 #==================== Install yay
-run "sudo pacman -Syu"
-run "sudo pacman -S --needed base-devel git"
-run "git clone https://aur.archlinux.org/yay.git"
-run "cd yay && makepkg -si --noconfirm && cd .."
+if [ ! -d "$HOME/yay" ]; then
+  run "git clone https://aur.archlinux.org/yay.git \"$HOME/yay\""
+fi
+run "cd \"$HOME/yay\" && makepkg -si --noconfirm"
 
 #==================== Check yay
 run "command -v yay"
@@ -86,7 +68,9 @@ run "flatpak install -y flathub com.discordapp.Discord"
 run "yay -S --noconfirm docker docker-compose freerdp qemu-full virt-manager libvirt bridge-utils dnsmasq ebtables iptables-nft dmidecode git"
 run "sudo systemctl enable --now docker libvirtd"
 run "sudo usermod -aG docker,libvirt \"$(whoami)\""
-run "git clone https://github.com/TibixDev/winboat.git \"$HOME/winboat\""
+if [ ! -d "$HOME/winboat" ]; then
+  run "git clone https://github.com/TibixDev/winboat.git \"$HOME/winboat\""
+fi
 run "cd \"$HOME/winboat\" && docker compose pull"
 run "cd \"$HOME/winboat\" && ./scripts/start.sh"
 
