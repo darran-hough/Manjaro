@@ -13,15 +13,44 @@ else
 fi
 
 run() {
+  local CMD="$*"
   if $EXECUTE; then
-    echo "▶️ Running: $*"
-    if ! eval "$@"; then
-      echo "⚠️ Command failed: $* — skipping and continuing..."
+    echo "▶️ Running: $CMD"
+    if ! eval "$CMD"; then
+      echo "❌ Command failed: $CMD"
+
+      # Attempt to fix common issues
+      if echo "$CMD" | grep -q "makepkg"; then
+        echo "🛠️ Installing base-devel and git..."
+        sudo pacman -S --needed base-devel git
+      elif echo "$CMD" | grep -q "yay"; then
+        echo "🛠️ Installing yay..."
+        sudo pacman -S --needed base-devel git
+        git clone https://aur.archlinux.org/yay.git || true
+        cd yay && makepkg -si --noconfirm && cd ..
+      elif echo "$CMD" | grep -q "flatpak"; then
+        echo "🛠️ Installing flatpak..."
+        sudo pacman -S --noconfirm flatpak
+      elif echo "$CMD" | grep -q "pamac"; then
+        echo "🛠️ Installing pamac-cli..."
+        sudo pacman -S --noconfirm pamac-cli
+      fi
+
+      echo "🔁 Retrying: $CMD"
+      if ! eval "$CMD"; then
+        echo "⚠️ Still failed after retry: $CMD — skipping."
+      fi
     fi
   else
-    echo "🧪 Would run: $*"
+    echo "🧪 Would run: $CMD"
   fi
 }
+
+#==================== Install yay
+run "sudo pacman -Syu"
+run "sudo pacman -S --needed base-devel git"
+run "git clone https://aur.archlinux.org/yay.git"
+run "cd yay && makepkg -si --noconfirm && cd .."
 
 #==================== Check yay
 run "command -v yay"
@@ -73,4 +102,3 @@ if $EXECUTE; then
 else
   echo "🔁 Would reboot system to apply group changes."
 fi
-
