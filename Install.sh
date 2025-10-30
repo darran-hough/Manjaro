@@ -15,7 +15,9 @@ fi
 run() {
   if $EXECUTE; then
     echo "▶️ Running: $*"
-    eval "$@"
+    if ! eval "$@"; then
+      echo "⚠️ Command failed: $* — skipping and continuing..."
+    fi
   else
     echo "🧪 Would run: $*"
   fi
