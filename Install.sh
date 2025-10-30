@@ -79,10 +79,15 @@ run "yay -S --noconfirm yabridge wine-staging"
 run "yabridgectl sync"
 run "yabridgectl add \"$HOME/.wine/drive_c/Program Files/VSTPlugins\""
 
-#==================== Reboot
+#==================== Reboot Prompt
 if $EXECUTE; then
-  echo "🔁 Rebooting to apply group changes..."
-  reboot
+  read -p "🔁 Installation complete. Do you want to reboot now? (y/N): " REBOOT_CONFIRM
+  if [[ "$REBOOT_CONFIRM" =~ ^[Yy]$ ]]; then
+    echo "♻️ Rebooting..."
+    sudo reboot
+  else
+    echo "💤 Reboot skipped. Remember to reboot later for group changes to take effect."
+  fi
 else
-  echo "🔁 Would reboot system to apply group changes."
+  echo "🧪 Dry run complete — would prompt for reboot if executed."
 fi
