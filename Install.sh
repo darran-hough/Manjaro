@@ -82,13 +82,6 @@ sudo pacman -S --needed --noconfirm steam
 yay -S --noconfirm heroic-games-launcher-bin
 
 # --------------------------------------------------------------------
-# Communication tools
-# --------------------------------------------------------------------
-notify "Installing Discord and WhatsApp"
-sudo pacman -S --needed --noconfirm discord
-yay -S --noconfirm whatsie-bin
-
-# --------------------------------------------------------------------
 # Web browsers
 # --------------------------------------------------------------------
 notify "Installing Chrome"
@@ -111,7 +104,6 @@ flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flat
 notify "Installing Flatpak apps"
 flatpak install -y flathub com.obsproject.Studio
 flatpak install -y flathub com.discordapp.Discord
-flatpak install -y flathub com.valvesoftware.Steam
 flatpak install -y flathub com.brave.Browser
 flatpak install -y flathub com.bitwig.BitwigStudio
 
