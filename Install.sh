@@ -73,9 +73,7 @@ done
 
 # Add realtime limits safely
 LIMITS=(
-  "@audio   -  memlock    unlimited"
-  "@realtime -  rtprio     99"
-  "@realtime -  memlock    unlimited"
+  "@audio - memlock unlimited"
 )
 
 if [ -f "$TARGET" ]; then
@@ -99,12 +97,7 @@ notify "Installing Wine (Staging), NVIDIA utilities, and Vulkan support"
 sudo pacman -S --needed --noconfirm \
   wine-staging wine-mono wine-gecko winetricks cabextract \
   nvidia-utils vulkan-icd-loader vulkan-tools
-
-# --------------------------------------------------------------------
-# DXVK (Vulkan-based Direct3D translation for Wine)
-# --------------------------------------------------------------------
 notify "Downloading and Installing DXVK"
-
 winetricks dxvk
 
 # --------------------------------------------------------------------
@@ -139,22 +132,6 @@ sudo pacman -S --needed --noconfirm vlc gimp piper
 sudo pacman -S --needed --noconfirm gst-libav gst-plugins-good gst-plugins-bad gst-plugins-ugly ffmpeg
 
 # --------------------------------------------------------------------
-# Gaming
-# --------------------------------------------------------------------
-notify "Installing Steam and Heroic"
-sudo pacman -S --needed --noconfirm steam
-yay -S --noconfirm heroic-games-launcher-bin
-
-# --------------------------------------------------------------------
-# Web browsers
-# --------------------------------------------------------------------
-notify "Installing Chrome"
-yay -S --noconfirm google-chrome
-
-# Optional: remove Firefox
-sudo pacman -Rns --noconfirm firefox || true
-
-# --------------------------------------------------------------------
 # Flatpak + Flathub Setup
 # --------------------------------------------------------------------
 notify "Setting up Flatpak and Flathub"
@@ -163,11 +140,29 @@ sudo systemctl enable --now flatpak-system-helper.service
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
 # --------------------------------------------------------------------
+# Web browsers
+# --------------------------------------------------------------------
+notify "Browser"
+yay -S --noconfirm google-chrome
+
+#flatpak install -y flathub com.brave.Browser
+
+# Optional: remove Firefox
+sudo pacman -Rns --noconfirm firefox || true
+
+# --------------------------------------------------------------------
+# Gaming
+# --------------------------------------------------------------------
+notify "Installing Steam and Heroic"
+sudo pacman -S --needed --noconfirm steam
+yay -S --noconfirm heroic-games-launcher-bin
+
+# --------------------------------------------------------------------
 # Flatpak Apps
 # --------------------------------------------------------------------
 notify "Installing Flatpak apps"
 flatpak install -y flathub com.discordapp.Discord
-flatpak install -y flathub com.brave.Browser
+flatpak install -y com.rtosta.zapzap
 
 # --------------------------------------------------------------------
 # Docker Setup
