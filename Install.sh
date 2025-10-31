@@ -44,10 +44,46 @@ notify "Installing alsa-scarlett-gui"
 yay -S --noconfirm alsa-scarlett-gui
 
 # --------------------------------------------------------------------
-# Wine (staging) and dependencies
+# Wine (Staging), NVIDIA Utils, Vulkan, and DXVK
 # --------------------------------------------------------------------
-notify "Installing Wine and Winetricks"
-sudo pacman -S --needed --noconfirm wine-staging wine-mono wine-gecko winetricks cabextract
+notify "Installing Wine (Staging), NVIDIA utilities, and Vulkan support"
+sudo pacman -S --needed --noconfirm \
+  wine-staging wine-mono wine-gecko winetricks cabextract \
+  nvidia-utils vulkan-icd-loader vulkan-tools
+
+# --------------------------------------------------------------------
+# DXVK (Vulkan-based Direct3D translation for Wine)
+# --------------------------------------------------------------------
+notify "Downloading and Installing DXVK"
+
+DXVK_DIR="$HOME/Downloads"
+mkdir -p "$DXVK_DIR"
+cd "$DXVK_DIR"
+
+# Get latest DXVK release info from GitHub API
+LATEST_DXVK_URL=$(curl -s https://api.github.com/repos/doitsujin/dxvk/releases/latest | grep browser_download_url | grep tar.gz | cut -d '"' -f 4 | head -n 1)
+
+if [ -n "$LATEST_DXVK_URL" ]; then
+  DXVK_TARBALL=$(basename "$LATEST_DXVK_URL")
+  notify "Downloading $DXVK_TARBALL"
+  wget -q --show-progress "$LATEST_DXVK_URL"
+  
+  notify "Extracting and installing DXVK"
+  tar -xvf "$DXVK_TARBALL"
+  DXVK_FOLDER=$(basename "$DXVK_TARBALL" .tar.gz)
+  cd "$DXVK_FOLDER"
+  ./setup_dxvk.sh install
+  cd "$HOME"
+else
+  echo "⚠️  Could not fetch the latest DXVK release from GitHub."
+  echo "   Please check your internet connection or GitHub API limits."
+fi
+
+# --------------------------------------------------------------------
+# Wine configuration
+# --------------------------------------------------------------------
+notify "Launching winecfg (please configure your Wine environment)"
+winecfg || true
 
 # --------------------------------------------------------------------
 # Yabridge
@@ -102,10 +138,8 @@ flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flat
 # Flatpak Apps
 # --------------------------------------------------------------------
 notify "Installing Flatpak apps"
-flatpak install -y flathub com.obsproject.Studio
 flatpak install -y flathub com.discordapp.Discord
 flatpak install -y flathub com.brave.Browser
-flatpak install -y flathub com.bitwig.BitwigStudio
 
 # Uncomment the line below to install Lightworks manually from a local file:
 # sudo flatpak install ./lightworks-2025.x-AMD64.flatpak
