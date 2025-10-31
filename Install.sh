@@ -1,35 +1,60 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # --------------------------------------------------------------------
 # Arch Linux Audio + Gaming Setup Script
 # Adapted from Ubuntu 22.04 script by darran-hough
-# Revised to skip existing installs/configs
+# Optimized and idempotent version (2025)
 # --------------------------------------------------------------------
 
-set -e
+set -euo pipefail
+IFS=$'\n\t'
 
-notify () {
-  echo "--------------------------------------------------------------------"
-  echo "$1"
-  echo "--------------------------------------------------------------------"
+# --------------------------------------------------------------------
+# Functions
+# --------------------------------------------------------------------
+notify() {
+  echo -e "\n\033[1;36m==> $1\033[0m\n"
 }
 
+pkg_install() {
+  local manager="$1"; shift
+  local pkgs=("$@")
+  case "$manager" in
+    pacman)
+      sudo pacman -S --needed --noconfirm "${pkgs[@]}"
+      ;;
+    yay)
+      yay -S --needed --noconfirm "${pkgs[@]}"
+      ;;
+  esac
+}
+
+already_installed() {
+  local pkg="$1"
+  pacman -Q "$pkg" &>/dev/null || yay -Q "$pkg" &>/dev/null
+}
+
+# --------------------------------------------------------------------
+# Update system
+# --------------------------------------------------------------------
 notify "Updating system"
 sudo pacman -Syu --noconfirm
 
 # --------------------------------------------------------------------
-# Install base packages
+# Essentials
 # --------------------------------------------------------------------
 notify "Installing essential tools"
-sudo pacman -S --needed --noconfirm base-devel git curl wget unzip p7zip nano
+pkg_install pacman base-devel git curl wget unzip p7zip nano
 
 # --------------------------------------------------------------------
-# Install yay (AUR helper) if not already installed
+# Yay setup
 # --------------------------------------------------------------------
 if ! command -v yay &>/dev/null; then
   notify "Installing yay (AUR helper)"
-  git clone https://aur.archlinux.org/yay.git
-  cd yay && makepkg -si --noconfirm
-  cd .. && rm -rf yay
+  git clone https://aur.archlinux.org/yay.git /tmp/yay
+  pushd /tmp/yay >/dev/null
+  makepkg -si --noconfirm
+  popd >/dev/null
+  rm -rf /tmp/yay
 else
   echo "yay already installed — skipping"
 fi
@@ -39,99 +64,53 @@ fi
 # --------------------------------------------------------------------
 notify "Setting up Focusrite Scarlett config"
 SCARLETT_CONF="/etc/modprobe.d/scarlett.conf"
-if [ ! -f "$SCARLETT_CONF" ]; then
+if [[ ! -f $SCARLETT_CONF ]]; then
   echo "options snd_usb_audio vid=0x1235 pid=0x8213 device_setup=1" | sudo tee "$SCARLETT_CONF"
 else
   echo "Scarlett config already exists — skipping"
 fi
 
-# alsa-scarlett-gui + firmware
-notify "Installing alsa-scarlett-gui"
-if ! yay -Q alsa-scarlett-gui &>/dev/null; then
-  yay -S --noconfirm alsa-scarlett-gui
-else
-  echo "alsa-scarlett-gui already installed — skipping"
-fi
+pkg_install yay alsa-scarlett-gui
 
 # --------------------------------------------------------------------
 # Realtime Audio Configuration
 # --------------------------------------------------------------------
 notify "Configuring realtime audio permissions"
 
-TARGET="/etc/security/limits.conf"
-CURRENT_USER="${SUDO_USER:-$USER}"
-
-# Ensure audio and realtime groups exist
 for grp in audio realtime; do
-  if ! getent group "$grp" > /dev/null; then
-    echo "Creating group: $grp"
-    sudo groupadd "$grp"
-  else
-    echo "Group exists: $grp"
+  getent group "$grp" >/dev/null || sudo groupadd "$grp"
+  if ! id -nG "${SUDO_USER:-$USER}" | grep -qw "$grp"; then
+    sudo usermod -aG "$grp" "${SUDO_USER:-$USER}"
   fi
 done
 
-# Add user to groups
-for grp in audio realtime; do
-  if id -nG "$CURRENT_USER" | grep -qw "$grp"; then
-    echo "User '$CURRENT_USER' already in group '$grp'"
-  else
-    echo "Adding user '$CURRENT_USER' to group '$grp'"
-    sudo usermod -aG "$grp" "$CURRENT_USER"
-  fi
-done
-
-# Add realtime limits safely
-LIMITS=(
-  "@audio - memlock unlimited"
-)
-
-if [ -f "$TARGET" ]; then
-  for LINE in "${LIMITS[@]}"; do
-    if ! grep -qF -- "$LINE" "$TARGET"; then
-      echo "Adding line: $LINE"
-      echo "$LINE" | sudo tee -a "$TARGET" > /dev/null
-    else
-      echo "Line already present: $LINE"
-    fi
-  done
-else
-  echo "Creating $TARGET and adding realtime limits"
-  printf "%s\n" "${LIMITS[@]}" | sudo tee "$TARGET" > /dev/null
-fi
+LIMITS_FILE="/etc/security/limits.conf"
+LIMIT_LINE="@audio - memlock unlimited"
+grep -qxF "$LIMIT_LINE" "$LIMITS_FILE" 2>/dev/null || echo "$LIMIT_LINE" | sudo tee -a "$LIMITS_FILE" >/dev/null
 
 # --------------------------------------------------------------------
-# Wine (Staging), NVIDIA Utils, Vulkan, and DXVK
+# Wine + DXVK + NVIDIA + Vulkan
 # --------------------------------------------------------------------
 notify "Installing Wine (Staging), NVIDIA utilities, and Vulkan support"
-sudo pacman -S --needed --noconfirm \
+pkg_install pacman \
   wine-staging wine-mono wine-gecko winetricks cabextract \
   nvidia-utils vulkan-icd-loader vulkan-tools
 
-notify "Downloading and Installing DXVK"
-if ! winetricks list-installed | grep -q dxvk; then
-  winetricks dxvk
-else
-  echo "DXVK already installed — skipping"
-fi
+notify "Installing DXVK"
+winetricks list-installed 2>/dev/null | grep -q dxvk || winetricks -q dxvk
 
 # --------------------------------------------------------------------
 # Wine configuration
 # --------------------------------------------------------------------
-notify "Launching winecfg (please configure your Wine environment)"
+notify "Launching winecfg (configure your Wine environment)"
 winecfg || true
 
 # --------------------------------------------------------------------
 # Yabridge
 # --------------------------------------------------------------------
 notify "Installing Yabridge"
-if ! yay -Q yabridge &>/dev/null; then
-  yay -S --noconfirm yabridge yabridgectl
-else
-  echo "Yabridge already installed — skipping"
-fi
+pkg_install yay yabridge yabridgectl
 
-# Create common VST paths
 VST_PATHS=(
   "$HOME/.wine/drive_c/Program Files/Steinberg/VstPlugins"
   "$HOME/.wine/drive_c/Program Files/Common Files/VST2"
@@ -139,110 +118,104 @@ VST_PATHS=(
 )
 for path in "${VST_PATHS[@]}"; do
   mkdir -p "$path"
-  yabridgectl add "$path" || true
+  yabridgectl add "$path" 2>/dev/null || true
 done
 
 # --------------------------------------------------------------------
-# Multimedia and productivity tools
+# Multimedia + Productivity
 # --------------------------------------------------------------------
 notify "Installing multimedia tools"
-sudo pacman -S --needed --noconfirm vlc gimp piper gst-libav gst-plugins-good gst-plugins-bad gst-plugins-ugly ffmpeg
+pkg_install pacman vlc gimp piper gst-libav gst-plugins-{good,bad,ugly} ffmpeg
 
 # --------------------------------------------------------------------
-# Flatpak + Flathub Setup
+# Flatpak + Flathub
 # --------------------------------------------------------------------
 notify "Setting up Flatpak and Flathub"
-sudo pacman -S --needed --noconfirm flatpak
+pkg_install pacman flatpak
 sudo systemctl enable --now flatpak-system-helper.service
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
 # --------------------------------------------------------------------
-# Web browsers
+# Web Browsers
 # --------------------------------------------------------------------
 notify "Installing Google Chrome"
-if ! yay -Q google-chrome &>/dev/null; then
-  yay -S --noconfirm google-chrome
-else
-  echo "Google Chrome already installed — skipping"
-fi
-
-# Optional: remove Firefox
+pkg_install yay google-chrome
 sudo pacman -Rns --noconfirm firefox || true
 
 # --------------------------------------------------------------------
 # Gaming
 # --------------------------------------------------------------------
-notify "Installing Steam and Heroic"
-sudo pacman -S --needed --noconfirm steam
-if ! yay -Q heroic-games-launcher-bin &>/dev/null; then
-  yay -S --noconfirm heroic-games-launcher-bin
-else
-  echo "Heroic Games Launcher already installed — skipping"
-fi
+notify "Installing Steam and Heroic Games Launcher"
+pkg_install pacman steam
+pkg_install yay heroic-games-launcher-bin
 
 # --------------------------------------------------------------------
 # Flatpak Apps
 # --------------------------------------------------------------------
 notify "Installing Flatpak apps"
-flatpak install -y flathub com.discordapp.Discord || echo "Discord already installed"
-flatpak install -y flathub com.rtosta.zapzap || echo "Zapzap already installed"
+flatpak install -y flathub com.discordapp.Discord com.rtosta.zapzap || true
+
+# --------------------------------------------------------------------
+# Bitwig Studio
+# --------------------------------------------------------------------
+notify "Installing Bitwig Studio"
+pkg_install yay bitwig-studio
 
 # --------------------------------------------------------------------
 # Docker Setup
 # --------------------------------------------------------------------
 notify "Installing and enabling Docker"
-sudo pacman -S --needed --noconfirm docker docker-compose
+pkg_install pacman docker docker-compose
 sudo systemctl enable --now docker.service
 sudo groupadd docker 2>/dev/null || true
 sudo usermod -aG docker "$USER"
 docker run hello-world || true
 
 # --------------------------------------------------------------------
-# Backup
+# Backup Tool
 # --------------------------------------------------------------------
 notify "Installing backup tool (Deja Dup)"
-sudo pacman -S --needed --noconfirm deja-dup
+pkg_install pacman deja-dup
 
 # --------------------------------------------------------------------
 # GNOME Dock Favorites
 # --------------------------------------------------------------------
-notify "Pinning installed apps to the GNOME Dock"
+notify "Updating GNOME Dock favorites"
 
 FAVORITES=(
-  "google-chrome.desktop"
-  "org.gnome.Nautilus.desktop"
-  "org.gnome.Terminal.desktop"
-  "vlc.desktop"
-  "gimp.desktop"
-  "com.discordapp.Discord.desktop"
-  "steam.desktop"
-  "heroic-games-launcher-bin.desktop"
-  "deja-dup.desktop"
+  google-chrome.desktop
+  org.gnome.Nautilus.desktop
+  org.gnome.Terminal.desktop
+  com.discordapp.Discord.desktop
+  steam.desktop
+  heroic.desktop
+  org.freedesktop.Piper.desktop
+  com.bitwig.BitwigStudio.desktop
 )
 
-# Retrieve current favorites
-CURRENT_FAVORITES=$(gsettings get org.gnome.shell favorite-apps)
-
-# Append any missing apps
+CURRENT=$(gsettings get org.gnome.shell favorite-apps)
 for app in "${FAVORITES[@]}"; do
-  if [[ "$CURRENT_FAVORITES" != *"$app"* ]]; then
-    CURRENT_FAVORITES=$(echo "$CURRENT_FAVORITES" | sed "s/]$/, '$app']/")
-  fi
+  [[ "$CURRENT" == *"$app"* ]] || CURRENT=$(echo "$CURRENT" | sed "s/]$/, '$app']/")
 done
-
-# Apply updated favorites list
-gsettings set org.gnome.shell favorite-apps "$CURRENT_FAVORITES"
+gsettings set org.gnome.shell favorite-apps "$CURRENT"
 
 # --------------------------------------------------------------------
 # Cleanup
 # --------------------------------------------------------------------
 notify "Cleaning up"
 ORPHANS=$(pacman -Qtdq || true)
-if [ -n "$ORPHANS" ]; then
-  sudo pacman -Rns --noconfirm $ORPHANS
-fi
+[[ -n "$ORPHANS" ]] && sudo pacman -Rns --noconfirm $ORPHANS
 sudo pacman -Scc --noconfirm
 
-notify "Setup complete! Please reboot to apply all changes."
-read -p "Press Enter to reboot or Ctrl+C to cancel..."
-reboot
+# --------------------------------------------------------------------
+# Done
+# --------------------------------------------------------------------
+notify "✅ Setup complete! A reboot is recommended to apply all changes."
+
+read -rp "Would you like to reboot now? [y/N]: " REPLY
+if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+  echo "Rebooting..."
+  reboot
+else
+  echo "Reboot skipped. Please reboot manually later to finalize setup."
+fi
