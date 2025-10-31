@@ -49,7 +49,6 @@ yay -S --noconfirm alsa-scarlett-gui
 notify "Configuring realtime audio permissions"
 
 TARGET="/etc/security/limits.conf"
-LINE='@audio - memlock unlimited'
 CURRENT_USER="${SUDO_USER:-$USER}"
 
 # Ensure audio and realtime groups exist
@@ -72,17 +71,25 @@ for grp in audio realtime; do
   fi
 done
 
-# Add memlock line to limits.conf safely
+# Add realtime limits safely
+LIMITS=(
+  "@audio   -  memlock    unlimited"
+  "@realtime -  rtprio     99"
+  "@realtime -  memlock    unlimited"
+)
+
 if [ -f "$TARGET" ]; then
-  if ! grep -qF -- "$LINE" "$TARGET"; then
-    echo "Adding memlock line to $TARGET"
-    echo "$LINE" | sudo tee -a "$TARGET" > /dev/null
-  else
-    echo "memlock line already present in $TARGET"
-  fi
+  for LINE in "${LIMITS[@]}"; do
+    if ! grep -qF -- "$LINE" "$TARGET"; then
+      echo "Adding line: $LINE"
+      echo "$LINE" | sudo tee -a "$TARGET" > /dev/null
+    else
+      echo "Line already present: $LINE"
+    fi
+  done
 else
-  echo "Creating $TARGET and adding memlock line"
-  echo "$LINE" | sudo tee "$TARGET" > /dev/null
+  echo "Creating $TARGET and adding realtime limits"
+  printf "%s\n" "${LIMITS[@]}" | sudo tee "$TARGET" > /dev/null
 fi
 
 # --------------------------------------------------------------------
@@ -98,27 +105,7 @@ sudo pacman -S --needed --noconfirm \
 # --------------------------------------------------------------------
 notify "Downloading and Installing DXVK"
 
-DXVK_DIR="$HOME/Downloads"
-mkdir -p "$DXVK_DIR"
-cd "$DXVK_DIR"
-
-LATEST_DXVK_URL=$(curl -s https://api.github.com/repos/doitsujin/dxvk/releases/latest | grep browser_download_url | grep tar.gz | cut -d '"' -f 4 | head -n 1)
-
-if [ -n "$LATEST_DXVK_URL" ]; then
-  DXVK_TARBALL=$(basename "$LATEST_DXVK_URL")
-  notify "Downloading $DXVK_TARBALL"
-  wget -q --show-progress "$LATEST_DXVK_URL"
-  
-  notify "Extracting and installing DXVK"
-  tar -xvf "$DXVK_TARBALL"
-  DXVK_FOLDER=$(basename "$DXVK_TARBALL" .tar.gz)
-  cd "$DXVK_FOLDER"
-  ./setup_dxvk.sh install
-  cd "$HOME"
-else
-  echo "⚠️  Could not fetch the latest DXVK release from GitHub."
-  echo "   Please check your internet connection or GitHub API limits."
-fi
+winetricks dxvk
 
 # --------------------------------------------------------------------
 # Wine configuration
@@ -203,7 +190,10 @@ sudo pacman -S --needed --noconfirm deja-dup
 # Cleanup
 # --------------------------------------------------------------------
 notify "Cleaning up"
-sudo pacman -Rns $(pacman -Qtdq) --noconfirm || true
+ORPHANS=$(pacman -Qtdq || true)
+if [ -n "$ORPHANS" ]; then
+  sudo pacman -Rns --noconfirm $ORPHANS
+fi
 sudo pacman -Scc --noconfirm
 
 notify "Setup complete! Please reboot to apply all changes."
