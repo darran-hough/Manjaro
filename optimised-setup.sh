@@ -184,7 +184,6 @@ notify "Updating GNOME Dock favorites"
 
 FAVORITES=(
   google-chrome.desktop
-  org.gnome.Nautilus.desktop
   org.gnome.Terminal.desktop
   com.discordapp.Discord.desktop
   steam.desktop
