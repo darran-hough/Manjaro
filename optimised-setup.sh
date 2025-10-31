@@ -190,6 +190,7 @@ FAVORITES=(
   heroic.desktop
   org.freedesktop.Piper.desktop
   com.bitwig.BitwigStudio.desktop
+  com.rtosta.zapzap.desktop
 )
 
 CURRENT=$(gsettings get org.gnome.shell favorite-apps)
