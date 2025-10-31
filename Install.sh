@@ -44,6 +44,48 @@ notify "Installing alsa-scarlett-gui"
 yay -S --noconfirm alsa-scarlett-gui
 
 # --------------------------------------------------------------------
+# Realtime Audio Configuration
+# --------------------------------------------------------------------
+notify "Configuring realtime audio permissions"
+
+TARGET="/etc/security/limits.conf"
+LINE='@audio - memlock unlimited'
+CURRENT_USER="${SUDO_USER:-$USER}"
+
+# Ensure audio and realtime groups exist
+for grp in audio realtime; do
+  if ! getent group "$grp" > /dev/null; then
+    echo "Creating group: $grp"
+    sudo groupadd "$grp"
+  else
+    echo "Group exists: $grp"
+  fi
+done
+
+# Add user to groups
+for grp in audio realtime; do
+  if id -nG "$CURRENT_USER" | grep -qw "$grp"; then
+    echo "User '$CURRENT_USER' already in group '$grp'"
+  else
+    echo "Adding user '$CURRENT_USER' to group '$grp'"
+    sudo usermod -aG "$grp" "$CURRENT_USER"
+  fi
+done
+
+# Add memlock line to limits.conf safely
+if [ -f "$TARGET" ]; then
+  if ! grep -qF -- "$LINE" "$TARGET"; then
+    echo "Adding memlock line to $TARGET"
+    echo "$LINE" | sudo tee -a "$TARGET" > /dev/null
+  else
+    echo "memlock line already present in $TARGET"
+  fi
+else
+  echo "Creating $TARGET and adding memlock line"
+  echo "$LINE" | sudo tee "$TARGET" > /dev/null
+fi
+
+# --------------------------------------------------------------------
 # Wine (Staging), NVIDIA Utils, Vulkan, and DXVK
 # --------------------------------------------------------------------
 notify "Installing Wine (Staging), NVIDIA utilities, and Vulkan support"
@@ -60,7 +102,6 @@ DXVK_DIR="$HOME/Downloads"
 mkdir -p "$DXVK_DIR"
 cd "$DXVK_DIR"
 
-# Get latest DXVK release info from GitHub API
 LATEST_DXVK_URL=$(curl -s https://api.github.com/repos/doitsujin/dxvk/releases/latest | grep browser_download_url | grep tar.gz | cut -d '"' -f 4 | head -n 1)
 
 if [ -n "$LATEST_DXVK_URL" ]; then
@@ -140,9 +181,6 @@ flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flat
 notify "Installing Flatpak apps"
 flatpak install -y flathub com.discordapp.Discord
 flatpak install -y flathub com.brave.Browser
-
-# Uncomment the line below to install Lightworks manually from a local file:
-# sudo flatpak install ./lightworks-2025.x-AMD64.flatpak
 
 # --------------------------------------------------------------------
 # Docker Setup
