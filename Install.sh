@@ -1,8 +1,8 @@
 #!/bin/bash
 # --------------------------------------------------------------------
-# Arch Linux Audio + Gaming Setup Script (Clean Reinstall Mode)
+# Arch Linux Audio + Gaming Setup Script
 # Adapted from Ubuntu 22.04 script by darran-hough
-# Revised to REINSTALL everything cleanly if it already exists
+# Revised to skip existing installs/configs
 # --------------------------------------------------------------------
 
 set -e
@@ -13,43 +13,45 @@ notify () {
   echo "--------------------------------------------------------------------"
 }
 
-# --------------------------------------------------------------------
-# System Update
-# --------------------------------------------------------------------
 notify "Updating system"
 sudo pacman -Syu --noconfirm
 
 # --------------------------------------------------------------------
-# Base Packages
+# Install base packages
 # --------------------------------------------------------------------
 notify "Installing essential tools"
-sudo pacman -Rns --noconfirm base-devel git curl wget unzip p7zip nano || true
-sudo pacman -S --noconfirm base-devel git curl wget unzip p7zip nano
+sudo pacman -S --needed --noconfirm base-devel git curl wget unzip p7zip nano
 
 # --------------------------------------------------------------------
-# yay (AUR Helper)
+# Install yay (AUR helper) if not already installed
 # --------------------------------------------------------------------
-notify "Installing yay (AUR helper)"
-if command -v yay &>/dev/null; then
-  echo "Removing old yay..."
-  sudo rm -rf "$(which yay)" || true
-  sudo rm -rf /usr/bin/yay /opt/yay ~/yay || true
+if ! command -v yay &>/dev/null; then
+  notify "Installing yay (AUR helper)"
+  git clone https://aur.archlinux.org/yay.git
+  cd yay && makepkg -si --noconfirm
+  cd .. && rm -rf yay
+else
+  echo "yay already installed — skipping"
 fi
-git clone https://aur.archlinux.org/yay.git
-cd yay && makepkg -si --noconfirm
-cd .. && rm -rf yay
 
 # --------------------------------------------------------------------
-# Focusrite Scarlett Support
+# Focusrite Scarlett support
 # --------------------------------------------------------------------
 notify "Setting up Focusrite Scarlett config"
-sudo rm -f /etc/modprobe.d/scarlett.conf
-sudo mkdir -p /etc/modprobe.d
-echo "options snd_usb_audio vid=0x1235 pid=0x8213 device_setup=1" | sudo tee /etc/modprobe.d/scarlett.conf
+SCARLETT_CONF="/etc/modprobe.d/scarlett.conf"
+if [ ! -f "$SCARLETT_CONF" ]; then
+  echo "options snd_usb_audio vid=0x1235 pid=0x8213 device_setup=1" | sudo tee "$SCARLETT_CONF"
+else
+  echo "Scarlett config already exists — skipping"
+fi
 
+# alsa-scarlett-gui + firmware
 notify "Installing alsa-scarlett-gui"
-yay -Rns --noconfirm alsa-scarlett-gui || true
-yay -S --noconfirm alsa-scarlett-gui
+if ! yay -Q alsa-scarlett-gui &>/dev/null; then
+  yay -S --noconfirm alsa-scarlett-gui
+else
+  echo "alsa-scarlett-gui already installed — skipping"
+fi
 
 # --------------------------------------------------------------------
 # Realtime Audio Configuration
@@ -59,37 +61,59 @@ notify "Configuring realtime audio permissions"
 TARGET="/etc/security/limits.conf"
 CURRENT_USER="${SUDO_USER:-$USER}"
 
-# Recreate audio and realtime groups
+# Ensure audio and realtime groups exist
 for grp in audio realtime; do
-  if getent group "$grp" >/dev/null; then
-    echo "Removing existing group $grp..."
-    sudo groupdel "$grp" || true
+  if ! getent group "$grp" > /dev/null; then
+    echo "Creating group: $grp"
+    sudo groupadd "$grp"
+  else
+    echo "Group exists: $grp"
   fi
-  sudo groupadd "$grp"
-  sudo usermod -aG "$grp" "$CURRENT_USER"
 done
 
-# Replace realtime limits
-sudo rm -f "$TARGET"
-cat <<EOF | sudo tee "$TARGET" >/dev/null
-@audio - memlock unlimited
-EOF
+# Add user to groups
+for grp in audio realtime; do
+  if id -nG "$CURRENT_USER" | grep -qw "$grp"; then
+    echo "User '$CURRENT_USER' already in group '$grp'"
+  else
+    echo "Adding user '$CURRENT_USER' to group '$grp'"
+    sudo usermod -aG "$grp" "$CURRENT_USER"
+  fi
+done
+
+# Add realtime limits safely
+LIMITS=(
+  "@audio - memlock unlimited"
+)
+
+if [ -f "$TARGET" ]; then
+  for LINE in "${LIMITS[@]}"; do
+    if ! grep -qF -- "$LINE" "$TARGET"; then
+      echo "Adding line: $LINE"
+      echo "$LINE" | sudo tee -a "$TARGET" > /dev/null
+    else
+      echo "Line already present: $LINE"
+    fi
+  done
+else
+  echo "Creating $TARGET and adding realtime limits"
+  printf "%s\n" "${LIMITS[@]}" | sudo tee "$TARGET" > /dev/null
+fi
 
 # --------------------------------------------------------------------
-# Wine, NVIDIA, Vulkan, DXVK
+# Wine (Staging), NVIDIA Utils, Vulkan, and DXVK
 # --------------------------------------------------------------------
-notify "Reinstalling Wine (Staging), NVIDIA utils, and Vulkan support"
-sudo pacman -Rns --noconfirm \
-  wine-staging wine-mono wine-gecko winetricks cabextract \
-  nvidia-utils vulkan-icd-loader vulkan-tools || true
-
-sudo pacman -S --noconfirm \
+notify "Installing Wine (Staging), NVIDIA utilities, and Vulkan support"
+sudo pacman -S --needed --noconfirm \
   wine-staging wine-mono wine-gecko winetricks cabextract \
   nvidia-utils vulkan-icd-loader vulkan-tools
 
-notify "Reinstalling DXVK"
-rm -rf ~/.local/share/wineprefixes/default/dxvk* ~/.cache/winetricks/dxvk* || true
-winetricks -q dxvk
+notify "Downloading and Installing DXVK"
+if ! winetricks list-installed | grep -q dxvk; then
+  winetricks dxvk
+else
+  echo "DXVK already installed — skipping"
+fi
 
 # --------------------------------------------------------------------
 # Wine configuration
@@ -100,88 +124,114 @@ winecfg || true
 # --------------------------------------------------------------------
 # Yabridge
 # --------------------------------------------------------------------
-notify "Reinstalling Yabridge"
-yay -Rns --noconfirm yabridge yabridgectl || true
-yay -S --noconfirm yabridge yabridgectl
+notify "Installing Yabridge"
+if ! yay -Q yabridge &>/dev/null; then
+  yay -S --noconfirm yabridge yabridgectl
+else
+  echo "Yabridge already installed — skipping"
+fi
 
-# Reset Yabridge configuration
-yabridgectl clear || true
-
-# Recreate common VST paths
+# Create common VST paths
 VST_PATHS=(
   "$HOME/.wine/drive_c/Program Files/Steinberg/VstPlugins"
   "$HOME/.wine/drive_c/Program Files/Common Files/VST2"
   "$HOME/.wine/drive_c/Program Files/Common Files/VST3"
 )
 for path in "${VST_PATHS[@]}"; do
-  rm -rf "$path"
   mkdir -p "$path"
-  yabridgectl add "$path"
+  yabridgectl add "$path" || true
 done
 
 # --------------------------------------------------------------------
-# Multimedia Tools
+# Multimedia and productivity tools
 # --------------------------------------------------------------------
-notify "Reinstalling multimedia tools"
-sudo pacman -Rns --noconfirm vlc gimp piper gst-libav gst-plugins-good gst-plugins-bad gst-plugins-ugly ffmpeg || true
-sudo pacman -S --noconfirm vlc gimp piper gst-libav gst-plugins-good gst-plugins-bad gst-plugins-ugly ffmpeg
+notify "Installing multimedia tools"
+sudo pacman -S --needed --noconfirm vlc gimp piper gst-libav gst-plugins-good gst-plugins-bad gst-plugins-ugly ffmpeg
 
 # --------------------------------------------------------------------
-# Flatpak + Flathub
+# Flatpak + Flathub Setup
 # --------------------------------------------------------------------
-notify "Reinstalling Flatpak and Flathub"
-sudo pacman -Rns --noconfirm flatpak || true
-sudo pacman -S --noconfirm flatpak
+notify "Setting up Flatpak and Flathub"
+sudo pacman -S --needed --noconfirm flatpak
 sudo systemctl enable --now flatpak-system-helper.service
-flatpak remote-delete flathub || true
-flatpak remote-add flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
 # --------------------------------------------------------------------
-# Browser
+# Web browsers
 # --------------------------------------------------------------------
-notify "Reinstalling Google Chrome"
-yay -Rns --noconfirm google-chrome || true
-yay -S --noconfirm google-chrome
+notify "Installing Google Chrome"
+if ! yay -Q google-chrome &>/dev/null; then
+  yay -S --noconfirm google-chrome
+else
+  echo "Google Chrome already installed — skipping"
+fi
 
-# Remove Firefox if present
+# Optional: remove Firefox
 sudo pacman -Rns --noconfirm firefox || true
 
 # --------------------------------------------------------------------
 # Gaming
 # --------------------------------------------------------------------
-notify "Reinstalling Steam and Heroic"
-sudo pacman -Rns --noconfirm steam || true
-yay -Rns --noconfirm heroic-games-launcher-bin || true
-sudo pacman -S --noconfirm steam
-yay -S --noconfirm heroic-games-launcher-bin
+notify "Installing Steam and Heroic"
+sudo pacman -S --needed --noconfirm steam
+if ! yay -Q heroic-games-launcher-bin &>/dev/null; then
+  yay -S --noconfirm heroic-games-launcher-bin
+else
+  echo "Heroic Games Launcher already installed — skipping"
+fi
 
 # --------------------------------------------------------------------
 # Flatpak Apps
 # --------------------------------------------------------------------
-notify "Reinstalling Flatpak apps"
-flatpak uninstall -y com.discordapp.Discord com.rtosta.zapzap || true
-flatpak install -y flathub com.discordapp.Discord
-flatpak install -y flathub com.rtosta.zapzap
+notify "Installing Flatpak apps"
+flatpak install -y flathub com.discordapp.Discord || echo "Discord already installed"
+flatpak install -y flathub com.rtosta.zapzap || echo "Zapzap already installed"
 
 # --------------------------------------------------------------------
 # Docker Setup
 # --------------------------------------------------------------------
-notify "Reinstalling Docker"
-sudo systemctl stop docker.service || true
-sudo pacman -Rns --noconfirm docker docker-compose || true
-sudo pacman -S --noconfirm docker docker-compose
+notify "Installing and enabling Docker"
+sudo pacman -S --needed --noconfirm docker docker-compose
 sudo systemctl enable --now docker.service
-sudo groupdel docker || true
-sudo groupadd docker
+sudo groupadd docker 2>/dev/null || true
 sudo usermod -aG docker "$USER"
 docker run hello-world || true
 
 # --------------------------------------------------------------------
 # Backup
 # --------------------------------------------------------------------
-notify "Reinstalling Deja Dup"
-sudo pacman -Rns --noconfirm deja-dup || true
-sudo pacman -S --noconfirm deja-dup
+notify "Installing backup tool (Deja Dup)"
+sudo pacman -S --needed --noconfirm deja-dup
+
+# --------------------------------------------------------------------
+# GNOME Dock Favorites
+# --------------------------------------------------------------------
+notify "Pinning installed apps to the GNOME Dock"
+
+FAVORITES=(
+  "google-chrome.desktop"
+  "org.gnome.Nautilus.desktop"
+  "org.gnome.Terminal.desktop"
+  "vlc.desktop"
+  "gimp.desktop"
+  "com.discordapp.Discord.desktop"
+  "steam.desktop"
+  "heroic-games-launcher-bin.desktop"
+  "deja-dup.desktop"
+)
+
+# Retrieve current favorites
+CURRENT_FAVORITES=$(gsettings get org.gnome.shell favorite-apps)
+
+# Append any missing apps
+for app in "${FAVORITES[@]}"; do
+  if [[ "$CURRENT_FAVORITES" != *"$app"* ]]; then
+    CURRENT_FAVORITES=$(echo "$CURRENT_FAVORITES" | sed "s/]$/, '$app']/")
+  fi
+done
+
+# Apply updated favorites list
+gsettings set org.gnome.shell favorite-apps "$CURRENT_FAVORITES"
 
 # --------------------------------------------------------------------
 # Cleanup
