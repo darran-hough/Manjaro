@@ -217,20 +217,15 @@ sudo pacman -Rns --noconfirm firefox || true
 # --------------------------------------------------------------------
 # Gaming
 # --------------------------------------------------------------------
-notify "Installing Steam, Heroic, and ProtonUp-Qt"
+notify "Installing Steam, Heroic, and ProtonUp"
+
+# Install Steam via pacman
 pkg_install pacman steam
-pkg_install yay heroic-games-launcher-bin protonup-qt
 
-# Auto-install Proton-GE using ProtonUp CLI
-notify "Installing latest Proton-GE versions via ProtonUp-Qt CLI"
-if command -v protonup-qt &>/dev/null; then
-  protonup-qt --install --latest --for steam || true
-  protonup-qt --install --latest --for heroic || true
-else
-  echo "ProtonUp-Qt CLI not found — skipping Proton-GE install."
-fi
+# Install Heroic and ProtonUp (CLI) via yay
+pkg_install yay heroic-games-launcher-bin protonup
 
-echo "✅ Proton-GE installed for Steam and Heroic (via ProtonUp-Qt CLI)."
+echo "✅ Installed Steam, Heroic Games Launcher, and ProtonUp"
 
 # --------------------------------------------------------------------
 # Flatpak Apps
