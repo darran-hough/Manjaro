@@ -4,7 +4,7 @@
 # Adapted from Ubuntu 22.04 script by darran-hough
 # Optimized and idempotent version (2025)
 # --------------------------------------------------------------------
-
+sudo pacman -Syu
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -73,10 +73,11 @@ fi
 pkg_install yay alsa-scarlett-gui
 
 # --------------------------------------------------------------------
-# Realtime Audio Configuration
+# Realtime Audio Configuration (PipeWire optimized)
 # --------------------------------------------------------------------
-notify "Configuring realtime audio permissions"
+notify "Configuring realtime audio permissions (PipeWire compatible)"
 
+# Ensure audio + realtime groups exist
 for grp in audio realtime; do
   getent group "$grp" >/dev/null || sudo groupadd "$grp"
   if ! id -nG "${SUDO_USER:-$USER}" | grep -qw "$grp"; then
@@ -84,9 +85,63 @@ for grp in audio realtime; do
   fi
 done
 
-LIMITS_FILE="/etc/security/limits.conf"
-LIMIT_LINE="@audio - memlock unlimited"
-grep -qxF "$LIMIT_LINE" "$LIMITS_FILE" 2>/dev/null || echo "$LIMIT_LINE" | sudo tee -a "$LIMITS_FILE" >/dev/null
+# PAM limits configuration
+LIMITS_FILE="/etc/security/limits.d/99-audio.conf"
+if [[ ! -f $LIMITS_FILE ]]; then
+  sudo tee "$LIMITS_FILE" >/dev/null <<'EOF'
+@audio   -   rtprio     95
+@audio   -   nice      -19
+@audio   -   memlock    unlimited
+EOF
+  echo "Created $LIMITS_FILE"
+else
+  echo "$LIMITS_FILE already exists — skipping"
+fi
+
+# Ensure PAM limits are loaded in session configs
+for pam_file in /etc/pam.d/common-session /etc/pam.d/common-session-noninteractive; do
+  if [[ -f "$pam_file" ]] && ! grep -q pam_limits.so "$pam_file"; then
+    echo "session required pam_limits.so" | sudo tee -a "$pam_file" >/dev/null
+  fi
+done
+
+# Systemd limits for PipeWire & WirePlumber
+SYSTEMD_DIR="/etc/systemd/system.conf.d"
+USERD_DIR="/etc/systemd/user.conf.d"
+sudo mkdir -p "$SYSTEMD_DIR" "$USERD_DIR"
+
+sudo tee "$SYSTEMD_DIR/95-audio.conf" >/dev/null <<'EOF'
+[Manager]
+DefaultLimitRTPRIO=95
+DefaultLimitMEMLOCK=infinity
+DefaultLimitNICE=-19
+EOF
+
+sudo tee "$USERD_DIR/95-audio.conf" >/dev/null <<'EOF'
+[Manager]
+DefaultLimitRTPRIO=95
+DefaultLimitMEMLOCK=infinity
+DefaultLimitNICE=-19
+EOF
+
+# Reload systemd to apply new limits
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+systemctl --user daemon-reexec || true
+systemctl --user daemon-reload || true
+
+# Enable and verify PipeWire + WirePlumber
+notify "Enabling PipeWire and WirePlumber user services"
+for svc in pipewire.service pipewire-pulse.service wireplumber.service; do
+  systemctl --user enable --now "$svc" || true
+done
+
+sleep 2
+notify "Verifying PipeWire and WirePlumber status"
+systemctl --user --no-pager --full status pipewire.service pipewire-pulse.service wireplumber.service | grep -E "Loaded|Active" || true
+
+echo -e "\n\033[1;32mPipeWire realtime configuration complete.\033[0m"
+echo "You may need to log out and back in (or reboot) for group membership changes to take effect."
 
 # --------------------------------------------------------------------
 # Wine + DXVK + NVIDIA + Vulkan
@@ -132,7 +187,7 @@ pkg_install pacman vlc gimp piper gst-libav gst-plugins-{good,bad,ugly} ffmpeg
 # --------------------------------------------------------------------
 notify "Setting up Flatpak and Flathub"
 pkg_install pacman flatpak
-sudo systemctl enable --now flatpak-system-helper.service
+sudo systemctl enable --now flatpak-system-helper.service || true
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
 # --------------------------------------------------------------------
