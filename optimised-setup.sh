@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # --------------------------------------------------------------------
-# Arch Linux Audio + Gaming Setup Script
+# Arch Linux / Manjaro Audio + Gaming Setup Script
 # Adapted from Ubuntu 22.04 script by darran-hough
 # Optimized and idempotent version (2025)
 # --------------------------------------------------------------------
@@ -85,8 +85,24 @@ for grp in audio realtime; do
   fi
 done
 
+# Ensure PAM is installed (some lightweight Manjaro editions omit it)
+if ! pacman -Qi pambase &>/dev/null; then
+  notify "Installing PAM base package (pambase)"
+  sudo pacman -S --needed --noconfirm pambase
+fi
+
 # PAM limits configuration
-LIMITS_FILE="/etc/security/limits.d/99-audio.conf"
+LIMITS_DIR="/etc/security/limits.d"
+LIMITS_FILE="$LIMITS_DIR/99-audio.conf"
+
+# Create directory if missing
+if [[ ! -d "$LIMITS_DIR" ]]; then
+  sudo mkdir -p "$LIMITS_DIR"
+  sudo chmod 755 "$LIMITS_DIR"
+  echo "Created missing directory: $LIMITS_DIR"
+fi
+
+# Create or verify the realtime limits file
 if [[ ! -f $LIMITS_FILE ]]; then
   sudo tee "$LIMITS_FILE" >/dev/null <<'EOF'
 @audio   -   rtprio     95
@@ -98,10 +114,11 @@ else
   echo "$LIMITS_FILE already exists — skipping"
 fi
 
-# Ensure PAM limits are loaded in session configs
+# Ensure PAM limits module is loaded
 for pam_file in /etc/pam.d/common-session /etc/pam.d/common-session-noninteractive; do
   if [[ -f "$pam_file" ]] && ! grep -q pam_limits.so "$pam_file"; then
     echo "session required pam_limits.so" | sudo tee -a "$pam_file" >/dev/null
+    echo "Added pam_limits.so to $pam_file"
   fi
 done
 
